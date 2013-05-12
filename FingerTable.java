@@ -6,7 +6,7 @@ public class FingerTable {
 	private ChordRing ring;
 
 	public FingerTable(ChordRing ring) {
-		this.table = new Node[ring.hashKeyLength];
+		this.table = new Node[ring.getHashKeyLength()];
 		this.ring = ring;
 	}
 

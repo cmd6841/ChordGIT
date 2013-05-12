@@ -4,94 +4,166 @@ import java.util.List;
 import java.util.Map;
 
 import edu.rit.numeric.ExponentialPrng;
+import edu.rit.numeric.ListSeries;
 import edu.rit.sim.Event;
 import edu.rit.sim.Simulation;
 
+/**
+ * Class Node represents a Node in the Chord Distributed Hash Table that stores
+ * data having hash keys related to its hash key. The hash key of a node is
+ * given by its id.
+ * 
+ * @author Chinmay Dani
+ * 
+ */
 public class Node implements Comparable<Node> {
-	public static boolean verbose = true;
-	private int id;
-	private List<Data> data;
-	private ChordRing ring;
-	private Map<Integer, Data> dataMap;
-	private Simulation sim;
-	private ExponentialPrng queryProcTimes;
-	public FingerTable fingerTable;
-	public Node predecessor;
-	public Node successor;
-	public boolean alive;
+	/**
+	 * Toggle verbose mode.
+	 */
+	public static boolean verbose;
 
+	/**
+	 * The hash key of a Node in the Chord Ring.
+	 */
+	private int id;
+
+	/**
+	 * The Chord ring to which the node belongs.
+	 */
+	private ChordRing ring;
+
+	/**
+	 * A collection of the data items the node stores.
+	 */
+	private Map<Integer, Data> dataMap;
+
+	/**
+	 * The Simulation object.
+	 */
+	private Simulation sim;
+
+	/**
+	 * A random number generator for generating random query processing/
+	 * forwarding times.
+	 */
+	private ExponentialPrng queryProcTimes;
+
+	/**
+	 * The finger table of the node containing entries of the nodes
+	 * corresponding to certain nodes in the Chord ring.
+	 */
+	private FingerTable fingerTable;
+
+	/**
+	 * The predecessor node of this node in the Chord ring.
+	 */
+	private Node predecessor;
+
+	/**
+	 * The successor node of this node in the Chord ring.
+	 */
+	private Node successor;
+
+	/**
+	 * A flag indicating whether the node is a active.
+	 */
+	private boolean isAlive;
+
+	/**
+	 * A series to accumulate the number of successful and failed lookups.
+	 */
+	private ListSeries lookupSeries;
+
+	/**
+	 * A list containing the hash keys of queries looked up by this Node.
+	 */
+	private List<Integer> seenQueries = new ArrayList<Integer>();
+
+	/**
+	 * Construct a new Node object with the supplied information.
+	 * 
+	 * @param id
+	 *            the hash key of the node
+	 * @param ring
+	 *            the Chord ring this node belongs to
+	 * @param sim
+	 *            the Simulation object
+	 * @param queryProcTimes
+	 *            the random query processing time generator
+	 * @param lookupSeries
+	 *            the accumulator series for lookup information
+	 */
 	public Node(int id, ChordRing ring, Simulation sim,
-			ExponentialPrng queryProcTimes) {
+			ExponentialPrng queryProcTimes, ListSeries lookupSeries) {
 		this.id = id;
 		this.ring = ring;
 		this.sim = sim;
 		this.queryProcTimes = queryProcTimes;
-		this.data = new ArrayList<Data>();
 		this.dataMap = new HashMap<Integer, Data>();
 		this.fingerTable = new FingerTable(ring);
 		this.predecessor = null;
 		this.successor = this;
-		this.alive = true;
+		this.isAlive = true;
+		this.lookupSeries = lookupSeries;
 	}
 
+	/**
+	 * Adds data to the Node's dataMap
+	 * 
+	 * @param data
+	 *            The Data object to be added.
+	 * @return true if object added successfully, false otherwise
+	 */
 	public boolean addData(Data data) {
-		this.dataMap.put(data.hashCode(), data);
-		return this.data.add(data);
+		return (this.dataMap.put(data.hashCode(), data) == null);
 	}
 
-	public String toString() {
-		return Integer.toString(id);// + data;
+	/**
+	 * Joins the Chord ring this Node belongs to, updates its finger table
+	 * entries and successor node and notifies its successor about its arrival.
+	 */
+	public void join() {
+		this.isAlive = true;
+		this.fingerTable.update(id);
+		this.successor = this.fingerTable.getIthEntry(0);
+		successor.notify(this);
 	}
 
-	@Override
-	public int compareTo(Node o) {
-		return this.id - o.id;
-	}
-
-	public int getId() {
-		return id;
-	}
-
-	public void notify(Node n) {
-		if (predecessor == null || (predecessor.id < n.id && n.id < id)) {
-			predecessor = n;
+	/**
+	 * Gets notified by a node to update the predecessor. Called when a new node
+	 * joins between the current node and its predecessor. Also, the data
+	 * belonging to the newly join node is transferred to the node.
+	 * 
+	 * @param node
+	 */
+	public void notify(Node node) {
+		if (predecessor == null || (predecessor.id < node.id && node.id < id)) {
+			predecessor = node;
 			HashMap<Integer, Data> tempMap = new HashMap<Integer, Data>();
 			tempMap.putAll(dataMap);
 			for (int key : tempMap.keySet()) {
-				if (key <= n.id) {
+				if (key <= node.id) {
 					dataMap.remove(key);
 				}
 			}
 		}
 	}
 
-	// private static PrintStream ps;
-	// static {
-	// try {
-	// ps = new PrintStream("ft.txt");
-	// } catch (FileNotFoundException e) {
-	// e.printStackTrace();
-	// }
-	// }
-
-	public void join() {
-		this.alive = true;
-		this.fingerTable.update(id);
-
-		// ps.append(this + ": " + fingerTable.string() + "\n");
-		this.successor = this.fingerTable.getIthEntry(0);
-		successor.notify(this);
-	}
-
+	/**
+	 * Starts the stabilization procedure for the current node.
+	 */
 	public void start() {
 		stabilize();
 		fixFingers();
 		checkPredecessor();
 	}
 
+	/**
+	 * Checks for any node that has joined and could be the successor to this
+	 * Node. Also, notifies the newly joined node to update its predecessor to
+	 * this node.
+	 */
 	public void stabilize() {
-		// System.out.printf("%.3f %s", sim.time(), ": ");
-		// System.out.println(this + " Stabilizing now");
 		Node x = successor.predecessor;
 		if (x != null && id < x.id && x.id < successor.id) {
 			successor = x;
@@ -99,117 +171,153 @@ public class Node implements Comparable<Node> {
 		}
 	}
 
-	private int next = -1;
-
+	/**
+	 * Fixes the finger table entries as a part of maintaining updated
+	 * information about the Chord ring.
+	 */
 	public void fixFingers() {
 		this.fingerTable.update(id);
-		// next += 1;
-		// if (next >= fingerTable.size())
-		// next = 0;
-		// fingerTable.updateEntry(id, next);
-
 	}
 
+	/**
+	 * Checks if the predecessor node is alive or not.
+	 */
 	public void checkPredecessor() {
-		if (predecessor != null && !predecessor.alive)
+		if (predecessor != null && !predecessor.isAlive)
 			predecessor = null;
 	}
 
-	public void copyData(Map<Integer, Data> data) {
-		this.dataMap.putAll(data);
-	}
-
+	/**
+	 * Changes the current state of the node in the Chord ring. If the node
+	 * turns inactive, then it copies all its data to its successor node. If the
+	 * node turns active, then calls the join() method to update its finger
+	 * table information.
+	 */
 	public void changeState() {
-		if (alive) {
-			alive = false;
-			// System.out.println(this + " copied data to " + successor);
+		if (isAlive) {
+			isAlive = false;
 			if (!dataMap.isEmpty()) {
 				successor.copyData(dataMap);
-//				if (verbose) {
-//					System.err.printf("%.3f %s", sim.time(), ": ");
-//					System.err.println(this + " copied " + dataMap + " to "
-//							+ successor);
-//				}
+				if (verbose) {
+					System.err.printf("%.3f %s", sim.time(), ": ");
+					System.err.println(this + " copied " + dataMap + " to "
+							+ successor);
+				}
 			}
 		} else {
-			alive = true;
+			isAlive = true;
 			join();
 		}
 	}
 
-	private List<Integer> seen = new ArrayList<Integer>();
+	/**
+	 * Stores a collection of Data objects in the current Node's dataMap.
+	 * 
+	 * @param data
+	 *            the collection of Data objects.
+	 */
+	public void copyData(Map<Integer, Data> data) {
+		this.dataMap.putAll(data);
+	}
 
 	/**
-	 * Checks for the current node if it contains the lookup key else forwards
-	 * it to the appropriate node in its finger table.
+	 * Checks whether the current node is in active state.
+	 * 
+	 * @return true if active, false otherwise
+	 */
+	public boolean isAlive() {
+		return isAlive;
+	}
+
+	/**
+	 * Returns the string representation of the Node.
+	 * 
+	 * @return The hash key of the node as a String
+	 */
+	public String toString() {
+		return Integer.toString(id);
+	}
+
+	/**
+	 * Compares the hash key of this node to another node.
+	 * 
+	 * @return 0 if the keys are equal, -1 if this node's key is lesser, +1
+	 *         otherwise
+	 */
+	@Override
+	public int compareTo(Node o) {
+		return this.id - o.id;
+	}
+
+	/**
+	 * Returns the FingerTable of this Node.
+	 * 
+	 * @return the FingerTable object
+	 */
+	public FingerTable getFingerTable() {
+		return this.fingerTable;
+	}
+
+	public int getId() {
+		return id;
+	}
+
+	/**
+	 * Lookup mechanism of the Chord DHT. Checks for the current node if it
+	 * contains the lookup key else forwards it to the appropriate node in its
+	 * finger table.
 	 * 
 	 * @param dataKey
+	 *            the hash key of the Data object being queried.
 	 */
 	public void query(final int dataKey) {
-		if (!alive) {
+		// Lookup failure if the current node is inactive.
+		if (!isAlive) {
 			if (verbose) {
-				System.out.println("I am dead!");
-				System.out.println("Node " + this + ": Lookup failed!");
+				System.out.println("Node " + this
+						+ " is inactive. Lookup failed!");
 			}
-			ChordRing.lookups.add(0.0);
-			sim.doAfter(queryProcTimes.next(), new Event() {
-
-				@Override
-				public void perform() {
-					ring.lookup();
-				}
-			});
+			lookupSeries.add(0);
 			return;
 		}
+		// Lookup failure if the data key is equal to the current node's hash
+		// key, but the data is not present on this node.
 		if (verbose)
 			System.out.printf("%.3f %s", sim.time(), ": ");
 		if (id == dataKey && !dataMap.containsKey(dataKey)) {
 			if (verbose) {
-				System.out.println("I don't have it!");
 				System.out.println("Node " + this + ": Lookup failed!");
 			}
-			ChordRing.lookups.add(0.0);
-			sim.doAfter(queryProcTimes.next(), new Event() {
-
-				@Override
-				public void perform() {
-					ring.lookup();
-				}
-			});
+			lookupSeries.add(0);
 			return;
 		}
-		if (!seen.isEmpty() && seen.get(seen.size() - 1) == dataKey) {
+		// Lookup failure if the current node is being looked up for the same
+		// query.
+		if (!seenQueries.isEmpty()
+				&& seenQueries.get(seenQueries.size() - 1) == dataKey) {
 			if (verbose) {
 				System.out.println("I looked it twice!");
 				System.out.println("Node " + this + ": Lookup failed!");
 			}
-			ChordRing.lookups.add(0.0);
-			sim.doAfter(queryProcTimes.next(), new Event() {
-
-				@Override
-				public void perform() {
-					ring.lookup();
-				}
-			});
+			lookupSeries.add(0);
 			return;
 		}
-		seen.add(dataKey);
+
+		seenQueries.add(dataKey);
+
 		if (verbose)
 			System.out.println("Node " + this + ": Received Query " + dataKey);
+
+		// Lookup success.
 		if (dataMap.containsKey(dataKey)) {
 			if (verbose)
 				System.out.println("Node " + this + ": Lookup success!");
-			ChordRing.lookups.add(1.0);
-			sim.doAfter(queryProcTimes.next(), new Event() {
-
-				@Override
-				public void perform() {
-					ring.lookup();
-				}
-			});
+			lookupSeries.add(1.0);
 			return;
-		} else {
-			// System.out.println(fingerTable.string());
+		}
+		// Forward the query to the node with the largest hash key lesser than
+		// the data hash key.
+		else {
 			if (dataKey > id) {
 				final Node succs = fingerTable.getIthEntry(0);
 				if (dataKey < succs.getId() || succs.getId() < id) {
@@ -218,7 +326,7 @@ public class Node implements Comparable<Node> {
 						@Override
 						public void perform() {
 							if (verbose)
-								System.out.println("***Forwarding Query "
+								System.out.println("*** Forwarding Query "
 										+ dataKey + " to " + succs);
 							succs.query(dataKey);
 						}
@@ -230,22 +338,20 @@ public class Node implements Comparable<Node> {
 			if (dataKey > id) {
 				diff = dataKey - id;
 			} else {
-				diff = ring.maxSize - 1 + dataKey - id;
+				diff = ring.ringMaxSize() - 1 + dataKey - id;
 			}
-			// System.out.println("Diff:" + diff);
 			for (int i = 1; i < fingerTable.size(); i++) {
-				// System.out.println(ring.getFingerTableEntry(id, i - 1));
-				if ((int) Math.pow(ring.base, i) > diff) {
-					final int ii = i;
+				if ((int) Math.pow(ring.ringBase(), i) > diff) {
+					final int temp = i;
 					sim.doAfter(queryProcTimes.next(), new Event() {
 
 						@Override
 						public void perform() {
 							if (verbose)
-								System.out.println("***Forwarding Query "
-										+ dataKey + " to " + (ii - 1) + ": "
-										+ fingerTable.getIthEntry(ii - 1));
-							fingerTable.getIthEntry(ii - 1).query(dataKey);
+								System.out.println("*** Forwarding Query "
+										+ dataKey + " to " + (temp - 1) + ": "
+										+ fingerTable.getIthEntry(temp - 1));
+							fingerTable.getIthEntry(temp - 1).query(dataKey);
 						}
 					});
 					return;
@@ -255,9 +361,8 @@ public class Node implements Comparable<Node> {
 
 				@Override
 				public void perform() {
-					// System.out.println(ring.getFingerTableEntry(id, 9));
 					if (verbose)
-						System.out.println("***Forwarding Query "
+						System.out.println("*** Forwarding Query "
 								+ dataKey
 								+ " to "
 								+ (fingerTable.size() - 1)

@@ -7,7 +7,7 @@ import edu.rit.util.Random;
 
 public class ChordSimulation04 {
 
-	private static double meanQueryProcTime = 100.0;
+	private static double meanQueryProcTime = 1.0;
 	private static double meanStabilizeTime = 0.1;
 	private static int seed = 31443;
 	private static Random rand;
@@ -28,26 +28,27 @@ public class ChordSimulation04 {
 
 		rand = Random.getInstance(seed);
 
-		Data.maxSize = (int) Math.pow(base, hashKeyLength);
 
 		initialNodes = (int) (Math.pow(base, hashKeyLength) * 0.5);
 
 		List<Data> dataList = new ArrayList<Data>();
 		for (int i = 0; i < initialNodes * 1.5; i++) {
-			Data data = new Data();
+			Data data = new Data(base, hashKeyLength);
 			dataList.add(data);
 		}
 
 		List<Data> queryList = new ArrayList<Data>();
-		for (int i = 0; i < 1000; i++) {
+		for (int i = 0; i < 100; i++) {
 			Data query = dataList.get(new java.util.Random().nextInt(dataList
 					.size()));
+			if(queryList.contains(query)) {
+				i--;
+				continue;
+			}
 			queryList.add(query);
 		}
 
 		sim = new Simulation();
-
-		ChordRing.lookups = new ListSeries();
 
 		ring = new ChordRing(base, hashKeyLength, initialNodes, sim, rand,
 				meanQueryProcTime);
@@ -60,17 +61,17 @@ public class ChordSimulation04 {
 			ring.addQuery(data.hashCode());
 		}
 
-		new Churner(sim, rand, 600, ring, 1, true);
-//		 new Churner(sim, rand, 5, ring, 1, false);
+		new Churner(sim, rand, 1, ring, 1, true);
+//		 new Churner(sim, rand, 1, ring, 1, false);
 
 		ring.lookup();
 		sim.run();
 
 		System.out.println();
 		System.out.println("Total number of queries\t: "
-				+ ChordRing.lookups.length());
+				+ ring.getSeries().length());
 		System.out.println("Lookup Success Ratio\t: "
-				+ ChordRing.lookups.stats().mean);
+				+ ring.getSeries().stats().mean);
 
 	}
 }
